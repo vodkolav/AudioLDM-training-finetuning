@@ -2,8 +2,7 @@ from multiprocessing.sharedctypes import Value
 import statistics
 import sys
 import os
-from tkinter import E
-
+import librosa
 import torch
 import torch.nn as nn
 import numpy as np
@@ -15,7 +14,7 @@ from functools import partial
 from tqdm import tqdm
 from torchvision.utils import make_grid
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
-from audioldm_train.conditional_models import *
+from audioldm_train.modules.encoders.modules import *
 import datetime
 
 from audioldm_train.utilities.model_util import (
@@ -236,6 +235,7 @@ class DDPM(pl.LightningModule):
         self.register_buffer("alphas_cumprod_prev", to_torch(alphas_cumprod_prev))
 
         # calculations for diffusion q(x_t | x_{t-1}) and others
+        epsilon = 1e-10
         self.register_buffer("sqrt_alphas_cumprod", to_torch(np.sqrt(alphas_cumprod)))
         self.register_buffer(
             "sqrt_one_minus_alphas_cumprod", to_torch(np.sqrt(1.0 - alphas_cumprod))
@@ -244,10 +244,10 @@ class DDPM(pl.LightningModule):
             "log_one_minus_alphas_cumprod", to_torch(np.log(1.0 - alphas_cumprod))
         )
         self.register_buffer(
-            "sqrt_recip_alphas_cumprod", to_torch(np.sqrt(1.0 / alphas_cumprod))
+            "sqrt_recip_alphas_cumprod", to_torch(np.sqrt(1.0 / (alphas_cumprod + epsilon)))
         )
         self.register_buffer(
-            "sqrt_recipm1_alphas_cumprod", to_torch(np.sqrt(1.0 / alphas_cumprod - 1))
+            "sqrt_recipm1_alphas_cumprod", to_torch(np.sqrt(1.0 / (alphas_cumprod + epsilon) - 1))
         )
 
         # calculations for posterior q(x_{t-1} | x_t, x_0)
@@ -1030,6 +1030,7 @@ class LatentDiffusion(DDPM):
             self.scale_factor = scale_factor
         else:
             self.register_buffer("scale_factor", torch.tensor(scale_factor))
+        #self.model.scale_factor = self.scale_factor
         self.instantiate_first_stage(first_stage_config)
         self.unconditional_prob_cfg = unconditional_prob_cfg
         self.cond_stage_models = nn.ModuleList([])
@@ -1322,6 +1323,7 @@ class LatentDiffusion(DDPM):
                 new_cond_dict[key] = cond_dict[key]
 
         # All the conditional key in the metadata should be used
+
         for key in self.cond_stage_model_metadata.keys():
             assert key in new_cond_dict.keys(), "%s, %s" % (
                 key,
@@ -1331,7 +1333,6 @@ class LatentDiffusion(DDPM):
         return new_cond_dict
 
     def shared_step(self, batch, **kwargs):
-        # self.check_module_param_update()
         if self.training:
             # Classifier-free guidance
             unconditional_prob_cfg = self.unconditional_prob_cfg
@@ -1884,6 +1885,7 @@ class LatentDiffusion(DDPM):
 
                 if limit_num is not None and i * z.size(0) > limit_num:
                     break
+                self.latent_t_size = z.size(-2)
 
                 c = self.filter_useful_cond_dict(c)
 
@@ -1930,6 +1932,10 @@ class LatentDiffusion(DDPM):
 
                 mel = self.decode_first_stage(samples)
 
+                SR = True
+                if (SR):
+                    mel = self.mel_replace_ops(mel, super().get_input(batch, "lowpass_mel"))
+
                 waveform = self.mel_spectrogram_to_waveform(
                     mel, savepath=waveform_save_path, bs=None, name=fnames, save=False
                 )
@@ -1951,16 +1957,84 @@ class LatentDiffusion(DDPM):
                         print("Choose the following indexes:", best_index)
                     except Exception as e:
                         print("Warning: while calculating CLAP score (not fatal), ", e)
+                
+                if (SR):
+                    waveform_lowpass = super().get_input(batch, "waveform_lowpass")
+                    waveform = self.postprocessing(waveform, waveform_lowpass)
+
+                    max_amp = np.max(np.abs(waveform), axis=-1)
+                    waveform = 0.5 * waveform / max_amp[..., None]
+                    mean_amp = np.mean(waveform, axis=-1)[..., None]
+                    waveform = waveform - mean_amp
 
                 self.save_waveform(waveform, waveform_save_path, name=fnames)
         return waveform_save_path
+
+
+    def _locate_cutoff_freq(self, stft, percentile=0.985):
+        def _find_cutoff(x, percentile=0.95):
+            percentile = x[-1] * percentile
+            for i in range(1, x.shape[0]):
+                if x[-i] < percentile:
+                    return x.shape[0] - i
+            return 0
+
+        magnitude = torch.abs(stft)
+        energy = torch.cumsum(torch.sum(magnitude, dim=0), dim=0)
+        return _find_cutoff(energy, percentile)
+
+    def mel_replace_ops(self, samples, input):
+        for i in range(samples.size(0)):
+            cutoff_melbin = self._locate_cutoff_freq(torch.exp(input[i]))
+
+            # ratio = samples[i][...,:cutoff_melbin]/input[i][...,:cutoff_melbin]
+            # print(torch.mean(ratio), torch.max(ratio), torch.min(ratio))
+
+            samples[i][..., :cutoff_melbin] = input[i][..., :cutoff_melbin]
+        return samples
+
+    def postprocessing(self, out_batch, x_batch):  # x is target
+        # Replace the low resolution part with the ground truth
+        for i in range(out_batch.shape[0]):
+            out = out_batch[i, 0]
+            x = x_batch[i, 0].cpu().numpy()
+            cutoffratio = self._get_cutoff_index_np(x)
+
+            length = out.shape[0]
+            stft_gt = librosa.stft(x)
+
+            stft_out = librosa.stft(out)
+            energy_ratio = np.mean(
+                np.sum(np.abs(stft_gt[cutoffratio]))
+                / np.sum(np.abs(stft_out[cutoffratio, ...]))
+            )
+            energy_ratio = min(max(energy_ratio, 0.8), 1.2)
+            stft_out[:cutoffratio, ...] = stft_gt[:cutoffratio, ...] / energy_ratio
+
+            out_renewed = librosa.istft(stft_out, length=length)
+            out_batch[i] = out_renewed
+        return out_batch
+
+    def _find_cutoff_np(self, x, threshold=0.95):
+        threshold = x[-1] * threshold
+        for i in range(1, x.shape[0]):
+            if x[-i] < threshold:
+                return x.shape[0] - i
+        return 0
+
+    def _get_cutoff_index_np(self, x):
+        stft_x = np.abs(librosa.stft(x))
+        energy = np.cumsum(np.sum(stft_x, axis=-1))
+        return self._find_cutoff_np(energy, 0.985)
 
 
 class DiffusionWrapper(pl.LightningModule):
     def __init__(self, diff_model_config, conditioning_key):
         super().__init__()
         self.diffusion_model = instantiate_from_config(diff_model_config)
-
+        self.scale_factor = (
+            None  # This factor is set in LatentDiffusion for scaling of VAE latent
+        )
         self.conditioning_key = conditioning_key
 
         for key in self.conditioning_key:
@@ -1970,6 +2044,7 @@ class DiffusionWrapper(pl.LightningModule):
                 or "hybrid" in key
                 or "film" in key
                 or "noncond" in key
+                or "ignore" in key
             ):
                 continue
             else:
@@ -1991,8 +2066,12 @@ class DiffusionWrapper(pl.LightningModule):
         conditional_keys = cond_dict.keys()
 
         for key in conditional_keys:
-            if "concat" in key:
-                xc = torch.cat([x, cond_dict[key].unsqueeze(1)], dim=1)
+            if "ignore" in key:
+                continue
+            elif "concat" in key:
+                cond = cond_dict[key]
+                cond = cond * self.scale_factor
+                xc = torch.cat([x, cond], dim=1)
             elif "film" in key:
                 if y is None:
                     y = cond_dict[key].squeeze(1)
@@ -2023,18 +2102,6 @@ class DiffusionWrapper(pl.LightningModule):
                 continue
             else:
                 raise NotImplementedError()
-
-        # if not self.being_verbosed_once:
-        #     print("The input shape to the diffusion model is as follows:")
-        #     print("xc", xc.size())
-        #     print("t", t.size())
-        #     for i in range(len(context_list)):
-        #         print(
-        #             "context_%s" % i, context_list[i].size(), attn_mask_list[i].size()
-        #         )
-        #     if y is not None:
-        #         print("y", y.size())
-        #     self.being_verbosed_once = True
 
         out = self.diffusion_model(
             xc, t, context_list=context_list, y=y, context_attn_mask_list=attn_mask_list
