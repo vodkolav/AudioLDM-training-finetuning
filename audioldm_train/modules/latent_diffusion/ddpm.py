@@ -43,6 +43,7 @@ from audioldm_train.modules.latent_diffusion.ddim import DDIMSampler
 from audioldm_train.modules.latent_diffusion.plms import PLMSSampler
 import soundfile as sf
 import os
+import librosa
 
 __conditioning_keys__ = {"concat": "c_concat", "crossattn": "c_crossattn", "adm": "y"}
 
@@ -1930,37 +1931,106 @@ class LatentDiffusion(DDPM):
 
                 mel = self.decode_first_stage(samples)
 
+                mel = self.mel_replace_ops(mel, super().get_input(batch, "lowpass_mel"))
+
                 waveform = self.mel_spectrogram_to_waveform(
                     mel, savepath=waveform_save_path, bs=None, name=fnames, save=False
                 )
 
-                if n_gen > 1:
-                    try:
-                        best_index = []
-                        similarity = self.clap.cos_similarity(
-                            torch.FloatTensor(waveform).squeeze(1), text
-                        )
-                        for i in range(z.shape[0]):
-                            candidates = similarity[i :: z.shape[0]]
-                            max_index = torch.argmax(candidates).item()
-                            best_index.append(i + max_index * z.shape[0])
+                waveform_lowpass = super().get_input(batch, "waveform_lowpass")
+                waveform = self.postprocessing(waveform, waveform_lowpass)
 
-                        waveform = waveform[best_index]
+                max_amp = np.max(np.abs(waveform), axis=-1)
+                waveform = 0.5 * waveform / max_amp[..., None]
+                mean_amp = np.mean(waveform, axis=-1)[..., None]
+                waveform = waveform - mean_amp
 
-                        print("Similarity between generated audio and text", similarity)
-                        print("Choose the following indexes:", best_index)
-                    except Exception as e:
-                        print("Warning: while calculating CLAP score (not fatal), ", e)
+                # if n_gen > 1:
+                #     try:
+                #         best_index = []
+                #         similarity = self.clap.cos_similarity(
+                #             torch.FloatTensor(waveform).squeeze(1), text
+                #         )
+                #         for i in range(z.shape[0]):
+                #             candidates = similarity[i :: z.shape[0]]
+                #             max_index = torch.argmax(candidates).item()
+                #             best_index.append(i + max_index * z.shape[0])
+
+                #         waveform = waveform[best_index]
+
+                #         print("Similarity between generated audio and text", similarity)
+                #         print("Choose the following indexes:", best_index)
+                #     except Exception as e:
+                #         print("Warning: while calculating CLAP score (not fatal), ", e)
 
                 self.save_waveform(waveform, waveform_save_path, name=fnames)
         return waveform_save_path
 
 
-class DiffusionWrapper(pl.LightningModule):
+def _locate_cutoff_freq(self, stft, percentile=0.985):
+        def _find_cutoff(x, percentile=0.95):
+            percentile = x[-1] * percentile
+            for i in range(1, x.shape[0]):
+                if x[-i] < percentile:
+                    return x.shape[0] - i
+            return 0
+
+        magnitude = torch.abs(stft)
+        energy = torch.cumsum(torch.sum(magnitude, dim=0), dim=0)
+        return _find_cutoff(energy, percentile)
+
+def mel_replace_ops(self, samples, input):
+    for i in range(samples.size(0)):
+        cutoff_melbin = self._locate_cutoff_freq(torch.exp(input[i]))
+
+        # ratio = samples[i][...,:cutoff_melbin]/input[i][...,:cutoff_melbin]
+        # print(torch.mean(ratio), torch.max(ratio), torch.min(ratio))
+
+        samples[i][..., :cutoff_melbin] = input[i][..., :cutoff_melbin]
+    return samples
+
+def postprocessing(self, out_batch, x_batch):  # x is target
+    # Replace the low resolution part with the ground truth
+    for i in range(out_batch.shape[0]):
+        out = out_batch[i, 0]
+        x = x_batch[i, 0].cpu().numpy()
+        cutoffratio = self._get_cutoff_index_np(x)
+
+        length = out.shape[0]
+        stft_gt = librosa.stft(x)
+
+        stft_out = librosa.stft(out)
+        energy_ratio = np.mean(
+            np.sum(np.abs(stft_gt[cutoffratio]))
+            / np.sum(np.abs(stft_out[cutoffratio, ...]))
+        )
+        energy_ratio = min(max(energy_ratio, 0.8), 1.2)
+        stft_out[:cutoffratio, ...] = stft_gt[:cutoffratio, ...] / energy_ratio
+
+        out_renewed = librosa.istft(stft_out, length=length)
+        out_batch[i] = out_renewed
+    return out_batch
+
+def _find_cutoff_np(self, x, threshold=0.95):
+    threshold = x[-1] * threshold
+    for i in range(1, x.shape[0]):
+        if x[-i] < threshold:
+            return x.shape[0] - i
+    return 0
+
+def _get_cutoff_index_np(self, x):
+    stft_x = np.abs(librosa.stft(x))
+    energy = np.cumsum(np.sum(stft_x, axis=-1))
+    return self._find_cutoff_np(energy, 0.985)
+
+
+class DiffusionWrapper(nn.Module):
     def __init__(self, diff_model_config, conditioning_key):
         super().__init__()
         self.diffusion_model = instantiate_from_config(diff_model_config)
-
+        self.scale_factor = (
+            None  # This factor is set in LatentDiffusion for scaling of VAE latent
+        )
         self.conditioning_key = conditioning_key
 
         for key in self.conditioning_key:
@@ -1970,6 +2040,7 @@ class DiffusionWrapper(pl.LightningModule):
                 or "hybrid" in key
                 or "film" in key
                 or "noncond" in key
+                or "ignore" in key
             ):
                 continue
             else:
@@ -1978,7 +2049,6 @@ class DiffusionWrapper(pl.LightningModule):
         self.being_verbosed_once = False
 
     def forward(self, x, t, cond_dict: dict = {}):
-
         x = x.contiguous()
         t = t.contiguous()
 
@@ -1991,8 +2061,12 @@ class DiffusionWrapper(pl.LightningModule):
         conditional_keys = cond_dict.keys()
 
         for key in conditional_keys:
-            if "concat" in key:
-                xc = torch.cat([x, cond_dict[key].unsqueeze(1)], dim=1)
+            if "ignore" in key:
+                continue
+            elif "concat" in key:
+                cond = cond_dict[key]
+                cond = cond * self.scale_factor
+                xc = torch.cat([x, cond], dim=1)
             elif "film" in key:
                 if y is None:
                     y = cond_dict[key].squeeze(1)
@@ -2024,22 +2098,96 @@ class DiffusionWrapper(pl.LightningModule):
             else:
                 raise NotImplementedError()
 
-        # if not self.being_verbosed_once:
-        #     print("The input shape to the diffusion model is as follows:")
-        #     print("xc", xc.size())
-        #     print("t", t.size())
-        #     for i in range(len(context_list)):
-        #         print(
-        #             "context_%s" % i, context_list[i].size(), attn_mask_list[i].size()
-        #         )
-        #     if y is not None:
-        #         print("y", y.size())
-        #     self.being_verbosed_once = True
-
         out = self.diffusion_model(
             xc, t, context_list=context_list, y=y, context_attn_mask_list=attn_mask_list
         )
         return out
+
+
+# class DiffusionWrapper(pl.LightningModule):
+#     def __init__(self, diff_model_config, conditioning_key):
+#         super().__init__()
+#         self.diffusion_model = instantiate_from_config(diff_model_config)
+
+#         self.conditioning_key = conditioning_key
+
+#         for key in self.conditioning_key:
+#             if (
+#                 "concat" in key
+#                 or "crossattn" in key
+#                 or "hybrid" in key
+#                 or "film" in key
+#                 or "noncond" in key
+#             ):
+#                 continue
+#             else:
+#                 raise Value("The conditioning key %s is illegal" % key)
+
+#         self.being_verbosed_once = False
+
+#     def forward(self, x, t, cond_dict: dict = {}):
+
+#         x = x.contiguous()
+#         t = t.contiguous()
+
+#         # x with condition (or maybe not)
+#         xc = x
+
+#         y = None
+#         context_list, attn_mask_list = [], []
+
+#         conditional_keys = cond_dict.keys()
+
+#         for key in conditional_keys:
+#             if "concat" in key:
+#                 xc = torch.cat([x, cond_dict[key].unsqueeze(1)], dim=1)
+#             elif "film" in key:
+#                 if y is None:
+#                     y = cond_dict[key].squeeze(1)
+#                 else:
+#                     y = torch.cat([y, cond_dict[key].squeeze(1)], dim=-1)
+#             elif "crossattn" in key:
+#                 # assert context is None, "You can only have one context matrix, got %s" % (cond_dict.keys())
+#                 if isinstance(cond_dict[key], dict):
+#                     for k in cond_dict[key].keys():
+#                         if "crossattn" in k:
+#                             context, attn_mask = cond_dict[key][
+#                                 k
+#                             ]  # crossattn_audiomae_pooled: torch.Size([12, 128, 768])
+#                 else:
+#                     assert len(cond_dict[key]) == 2, (
+#                         "The context condition for %s you returned should have two element, one context one mask"
+#                         % (key)
+#                     )
+#                     context, attn_mask = cond_dict[key]
+
+#                 # The input to the UNet model is a list of context matrix
+#                 context_list.append(context)
+#                 attn_mask_list.append(attn_mask)
+
+#             elif (
+#                 "noncond" in key
+#             ):  # If you use loss function in the conditional module, include the keyword "noncond" in the return dictionary
+#                 continue
+#             else:
+#                 raise NotImplementedError()
+
+#         # if not self.being_verbosed_once:
+#         #     print("The input shape to the diffusion model is as follows:")
+#         #     print("xc", xc.size())
+#         #     print("t", t.size())
+#         #     for i in range(len(context_list)):
+#         #         print(
+#         #             "context_%s" % i, context_list[i].size(), attn_mask_list[i].size()
+#         #         )
+#         #     if y is not None:
+#         #         print("y", y.size())
+#         #     self.being_verbosed_once = True
+
+#         out = self.diffusion_model(
+#             xc, t, context_list=context_list, y=y, context_attn_mask_list=attn_mask_list
+#         )
+#         return out
 
 
 class LatentDiffusionSpeedTest(pl.LightningModule):

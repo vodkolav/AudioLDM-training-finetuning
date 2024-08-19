@@ -141,8 +141,8 @@ model:
         target: audiosr.latent_diffusion.modules.encoders.modules.VAEFeatureExtract
         params:
           first_stage_config: 
-            base_learning_rate: 0.000008,
-            target: "audiosr.latent_encoder.autoencoder.AutoencoderKL",
+            base_learning_rate: 0.000008
+            target: "audiosr.latent_encoder.autoencoder.AutoencoderKL"
             params: 
                 sampling_rate: 48000
                 batchsize: 4
