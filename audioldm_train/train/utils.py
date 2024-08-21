@@ -13,7 +13,7 @@ import soundfile as sf
 import time
 import wave
 import torchaudio
-import progressbar
+#import progressbar
 from librosa.filters import mel as librosa_mel_fn
 import lowpass
 
