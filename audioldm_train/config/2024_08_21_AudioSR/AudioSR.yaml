@@ -1,3 +1,13 @@
+variables:
+  in_channels: &unet_in_channels 32
+  latent_embed_dim: &latent_embed_dim 16
+  latent_f_size: &latent_f_size 32
+  latent_t_size: &latent_t_size 128 # TODO might need to change
+  mel_bins: &mel_bins 256
+  optimize_ddpm_parameter: &optimize_ddpm_parameter true
+  optimize_gpt: &optimize_gpt true
+  sampling_rate: &sampling_rate 48000
+  warmup_steps: &warmup_steps 5000
 augmentation:
   mixup: 0.0
 data:
@@ -11,9 +21,9 @@ metadata_root: "./data/dataset/metadata/dataset_root.json"
 model:
   params:
     base_learning_rate: 0.0001
-    batchsize: 16
+    batchsize: 2
     beta_schedule: cosine
-    channels: 16
+    channels: *latent_embed_dim # TODO might need to change
     cond_stage_config:
       concat_lowpass_cond:
         cond_stage_key: lowpass_mel
@@ -23,6 +33,13 @@ model:
             base_learning_rate: 8.0e-06
             params:
               batchsize: 4
+              lossconfig:
+                params:
+                  disc_in_channels: 1
+                  disc_start: 50001
+                  disc_weight: 0.5
+                  kl_weight: 1000.0
+                target: audioldm_train.losses.LPIPSWithDiscriminator
               ddconfig:
                 attn_resolutions: []
                 ch: 128
@@ -69,12 +86,12 @@ model:
           downsample_time: false
           dropout: 0.1
           in_channels: 1
-          mel_bins: 256
+          mel_bins: *mel_bins # The frequency bins of mel spectrogram
           num_res_blocks: 2
           out_ch: 1
           resolution: 256
           z_channels: 16
-        embed_dim: 16
+        embed_dim: *latent_embed_dim
         image_key: fbank
         lossconfig:
           params:
@@ -85,21 +102,21 @@ model:
           target: audioldm_train.losses.LPIPSWithDiscriminator
         monitor: val/rec_loss
         #reload_from_ckpt: /mnt/bn/lqhaoheliu/project/audio_generation_diffusion/log/vae/vae_48k_256/ds_8_kl_1/checkpoints/ckpt-checkpoint-484999.ckpt
-        sampling_rate: 48000
+        sampling_rate: *sampling_rate
         subband: 1
         time_shuffle: 1
       target: audioldm_train.modules.latent_encoder.autoencoder.AutoencoderKL
     first_stage_key: fbank
-    latent_f_size: 32
-    latent_t_size: 128
+    latent_f_size: *latent_f_size
+    latent_t_size: *latent_t_size # TODO might need to change
     linear_end: 0.0195
     linear_start: 0.0015
     log_every_t: 200
     monitor: val/loss_simple_ema
     num_timesteps_cond: 1
-    optimize_ddpm_parameter: true
+    optimize_ddpm_parameter: *optimize_ddpm_parameter
     parameterization: v
-    sampling_rate: 48000
+    sampling_rate: *sampling_rate
     scale_by_std: true
     timesteps: 1000
     unconditional_prob_cfg: 0.1
@@ -116,25 +133,25 @@ model:
           - 5
         extra_sa_layer: true
         image_size: 64
-        in_channels: 32
+        in_channels: *unet_in_channels # The input channel of the UNet model
         model_channels: 128
         num_head_channels: 32
         num_res_blocks: 2
-        out_channels: 16
+        out_channels: *latent_embed_dim # TODO might need to change
         transformer_depth: 1
         use_spatial_transformer: true
       target: audioldm_train.modules.diffusionmodules.openaimodel.UNetModel
-    warmup_steps: 5000
+    warmup_steps: *warmup_steps
   target: audioldm_train.modules.latent_diffusion.ddpm.LatentDiffusion
 preprocessing:
   audio:
     duration: 10.24
-    max_wav_value: 32768
-    sampling_rate: 48000
+    max_wav_value: 32768.0
+    sampling_rate: *sampling_rate
   mel:
     mel_fmax: 24000
     mel_fmin: 20
-    n_mel_channels: 256
+    n_mel_channels: *mel_bins
   stft:
     filter_length: 2048
     hop_length: 480
@@ -146,13 +163,3 @@ step:
   save_checkpoint_every_n_steps: 5000
   save_top_k: 1
   validation_every_n_epochs: 5
-variables:
-  in_channels: &unet_in_channels 8
-  latent_embed_dim: &latent_embed_dim 8
-  latent_f_size: &latent_f_size 16
-  latent_t_size: &latent_t_size 256 # TODO might need to change
-  mel_bins: &mel_bins 64
-  optimize_ddpm_parameter: &optimize_ddpm_parameter true
-  optimize_gpt: &optimize_gpt true
-  sampling_rate: &sampling_rate 16000
-  warmup_steps: &warmup_steps 2000
