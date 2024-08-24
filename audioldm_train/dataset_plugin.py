@@ -170,6 +170,53 @@ def make_batch_for_super_resolution(config, dl_output, metadata):
     
     return {"lowpass_mel": lowpass_mel}
 
+
+
+def make_batch_for_single_tone_noise(config, dl_output, metadata):
+    waveform = dl_output["waveform"]  # [1, samples]
+    sampling_rate = dl_output["sampling_rate"]
+
+    duration = dl_output["duration"]
+
+    # Randomly pick a single tone noise frequency between 100 Hz and 15 kHz
+    freq = np.random.uniform(100.0, 15000.0)
+
+    # Randomly pick an amplitude noise between 0.1 and 1.0
+    amplitude = np.random.uniform(0.001, 0.2)
+
+    # Generate the single tone waveform
+    t = np.linspace(0, duration, int(sr * duration), endpoint=False)
+    tone_waveform = amplitude * np.sin(2 * np.pi * freq * t)
+                
+    # Add the single tone to the original waveform
+    waveform_plus_single_tone = waveform + tone_waveform
+
+    if(duration % 5.12 != 0):
+        pad_duration = duration + (5.12 - duration % 5.12)
+    else:
+        pad_duration = duration
+
+    target_frame = int(pad_duration * 100)
+
+
+    # Convert waveform with single tone to tensor and make adjustments of the length if needed. ( same as utils-> lowpass_filtering_prepare_inference)
+    waveform_plus_single_tone = torch.FloatTensor(waveform_plus_single_tone.copy()).unsqueeze(0)
+
+    if waveform.size(-1) <= waveform_plus_single_tone.size(-1):
+        waveform_plus_single_tone = waveform_plus_single_tone[..., : waveform.size(-1)]
+    else:
+        waveform_plus_single_tone = torch.functional.pad(
+            waveform_plus_single_tone, (0, waveform.size(-1) - waveform_plus_single_tone.size(-1))
+        )
+
+
+    audio_plus_single_tone_mel,  audio_plus_single_tone_stft = utils.wav_feature_extraction( waveform_plus_single_tone, target_frame)
+
+
+    audio_plus_single_tone_mel = torch.FloatTensor(audio_plus_single_tone_mel).unsqueeze(0)
+    
+    return {"audio_plus_single_tone_mel": audio_plus_single_tone_mel}
+
 ######################################################################
 
 
