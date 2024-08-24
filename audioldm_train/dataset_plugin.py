@@ -3,6 +3,8 @@ import torch
 import numpy as np
 import torchaudio
 import matplotlib.pyplot as plt
+import utils
+
 
 CACHE = {
     "get_vits_phoneme_ids": {
@@ -143,6 +145,32 @@ def waveform_rs_48k(config, dl_output, metadata):
         waveform_48k = waveform
 
     return {"waveform_48k": waveform_48k}
+
+############ Addition for add_ons Audiosr ##########
+def make_batch_for_super_resolution(config, dl_output, metadata):
+    waveform = dl_output["waveform"]  # [1, samples]
+    sampling_rate = dl_output["sampling_rate"]
+
+    duration = dl_output["duration"]
+                         
+    if(duration % 5.12 != 0):
+        pad_duration = duration + (5.12 - duration % 5.12)
+    else:
+        pad_duration = duration
+
+    target_frame = int(pad_duration * 100)
+
+
+    waveform_lowpass = utils.lowpass_filtering_prepare_inference(dl_output)
+
+    lowpass_mel, lowpass_stft = utils.wav_feature_extraction( waveform_lowpass["waveform_lowpass"], target_frame)
+
+    # waveform_lowpass = torch.FloatTensor(waveform_lowpass).unsqueeze(0)
+    lowpass_mel = torch.FloatTensor(lowpass_mel).unsqueeze(0)
+    
+    return {"lowpass_mel": lowpass_mel}
+
+######################################################################
 
 
 def extract_vits_phoneme_and_flant5_text(config, dl_output, metadata):
