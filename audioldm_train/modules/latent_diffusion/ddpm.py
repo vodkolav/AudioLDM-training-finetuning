@@ -38,10 +38,28 @@ from audioldm_train.modules.diffusionmodules.distributions import (
 )
 
 
+from audioldm_train.conditional_models import CLAPGenAudioMAECond, SequenceGenAudioMAECond
 from audioldm_train.modules.latent_diffusion.ddim import DDIMSampler
 from audioldm_train.modules.latent_diffusion.plms import PLMSSampler
 import soundfile as sf
 import os
+
+
+def dbg(lbl, oobj):
+    prt = "========{\n" + lbl
+    if isinstance(oobj, list):
+        prt += "list of shape: " + str(len(oobj)) + "\n"
+    elif isinstance(oobj, dict):
+        prt += "dict: \n"
+        for k in oobj.keys():
+            prt += k + str(type(oobj[k])) + " of shape: " + str(oobj[k].shape) + "\n"
+    elif isinstance(oobj, torch.Tensor):        
+        prt += "Tensor of shape: " + str(oobj.shape)
+    else:
+        prt = str(oobj)
+    prt += "}========\n"
+    print(prt)
+
 
 __conditioning_keys__ = {"concat": "c_concat", "crossattn": "c_crossattn", "adm": "y"}
 
@@ -1030,7 +1048,7 @@ class LatentDiffusion(DDPM):
             self.scale_factor = scale_factor
         else:
             self.register_buffer("scale_factor", torch.tensor(scale_factor))
-        #self.model.scale_factor = self.scale_factor
+        self.model.scale_factor = self.scale_factor
         self.instantiate_first_stage(first_stage_config)
         self.unconditional_prob_cfg = unconditional_prob_cfg
         self.cond_stage_models = nn.ModuleList([])
@@ -1242,12 +1260,13 @@ class LatentDiffusion(DDPM):
                         xc = xc.to(self.device)
                 else:
                     xc = batch
-
+                dbg("1 xc ", xc)
                 # if cond_stage_key is "all", xc will be a dictionary containing all keys
                 # Otherwise xc will be an entry of the dictionary
                 c = self.get_learned_conditioning(
                     xc, key=cond_model_key, unconditional_cfg=unconditional_cfg
                 )
+                dbg("1 c ", c)
 
                 # cond_dict will be used to condition the diffusion model
                 # If one conditional model return multiple conditioning signal
@@ -1256,7 +1275,7 @@ class LatentDiffusion(DDPM):
                         cond_dict[k] = c[k]
                 else:
                     cond_dict[cond_model_key] = c
-
+                dbg("1 cond_dict ", cond_dict)
         # If the key is accidently added to the dictionary and not in the condition list, remove the condition
         # for k in list(cond_dict.keys()):
         #     if(k not in self.cond_stage_model_metadata.keys()):
@@ -1838,6 +1857,10 @@ class LatentDiffusion(DDPM):
             )
 
         return samples, intermediate
+    
+
+
+
 
     @torch.no_grad()
     def generate_sample(
@@ -1885,9 +1908,11 @@ class LatentDiffusion(DDPM):
 
                 if limit_num is not None and i * z.size(0) > limit_num:
                     break
-                self.latent_t_size = z.size(-2)
+                #self.latent_t_size = z.size(-2)
+         #       dbg("1c", c)
 
                 c = self.filter_useful_cond_dict(c)
+               # dbg("2c", c)
 
                 text = super().get_input(batch, "text")
 
@@ -1896,6 +1921,7 @@ class LatentDiffusion(DDPM):
 
                 # Generate multiple samples at a time and filter out the best
                 # The condition to the diffusion wrapper can have many format
+        #        dbg("3c", c)
                 for cond_key in c.keys():
                     if isinstance(c[cond_key], list):
                         for i in range(len(c[cond_key])):
@@ -1905,7 +1931,7 @@ class LatentDiffusion(DDPM):
                             c[cond_key][k] = torch.cat([c[cond_key][k]] * n_gen, dim=0)
                     else:
                         c[cond_key] = torch.cat([c[cond_key]] * n_gen, dim=0)
-
+          #      dbg("4c", c)
                 text = text * n_gen
 
                 if unconditional_guidance_scale != 1.0:
@@ -2070,8 +2096,12 @@ class DiffusionWrapper(pl.LightningModule):
                 continue
             elif "concat" in key:
                 cond = cond_dict[key]
+                print("|||scale_factor: ", self.scale_factor, " cond: ", cond.shape)                
                 cond = cond * self.scale_factor
+                print("|||xc: ", xc.shape)
+                print("|||x: ", x.shape, " cond: ", cond.shape)
                 xc = torch.cat([x, cond], dim=1)
+                
             elif "film" in key:
                 if y is None:
                     y = cond_dict[key].squeeze(1)
@@ -2352,6 +2382,7 @@ class LatentDiffusionVAELearnable(LatentDiffusion):
             on_step=True,
             on_epoch=False,
         )
+
 
 
 if __name__ == "__main__":

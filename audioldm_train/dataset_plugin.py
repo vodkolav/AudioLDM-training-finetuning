@@ -145,6 +145,12 @@ def waveform_rs_48k(config, dl_output, metadata):
     return {"waveform_48k": waveform_48k}
 
 
+def dummy_mel(config, dl_output, metadata):
+    log_mel_spec = dl_output["log_mel_spec"]  # [1, samples]
+    
+    return {"lowpass_mel": log_mel_spec}
+
+
 def extract_vits_phoneme_and_flant5_text(config, dl_output, metadata):
     assert (
         "phoneme" not in metadata.keys()
