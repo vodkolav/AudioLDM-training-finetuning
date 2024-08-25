@@ -62,7 +62,7 @@ class VAEFeatureExtract(nn.Module):
         #self.vae.train = disabled_train
 
     def forward(self, batch):
-        assert self.vae.training == False
+        #assert self.vae.training == False
         if self.device is None:
             self.device = next(self.vae.parameters()).device
 

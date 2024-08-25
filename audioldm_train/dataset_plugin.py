@@ -147,8 +147,8 @@ def waveform_rs_48k(config, dl_output, metadata):
 
 def dummy_mel(config, dl_output, metadata):
     log_mel_spec = dl_output["log_mel_spec"]  # [1, samples]
-    
-    return {"lowpass_mel": log_mel_spec}
+    waveform = dl_output["waveform"]
+    return {"lowpass_mel": log_mel_spec, "waveform_lowpass": waveform}
 
 
 def extract_vits_phoneme_and_flant5_text(config, dl_output, metadata):

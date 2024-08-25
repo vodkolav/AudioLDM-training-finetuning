@@ -1260,13 +1260,11 @@ class LatentDiffusion(DDPM):
                         xc = xc.to(self.device)
                 else:
                     xc = batch
-                dbg("1 xc ", xc)
                 # if cond_stage_key is "all", xc will be a dictionary containing all keys
                 # Otherwise xc will be an entry of the dictionary
                 c = self.get_learned_conditioning(
                     xc, key=cond_model_key, unconditional_cfg=unconditional_cfg
                 )
-                dbg("1 c ", c)
 
                 # cond_dict will be used to condition the diffusion model
                 # If one conditional model return multiple conditioning signal
@@ -1275,7 +1273,6 @@ class LatentDiffusion(DDPM):
                         cond_dict[k] = c[k]
                 else:
                     cond_dict[cond_model_key] = c
-                dbg("1 cond_dict ", cond_dict)
         # If the key is accidently added to the dictionary and not in the condition list, remove the condition
         # for k in list(cond_dict.keys()):
         #     if(k not in self.cond_stage_model_metadata.keys()):
@@ -1986,7 +1983,7 @@ class LatentDiffusion(DDPM):
                 
                 if (SR):
                     waveform_lowpass = super().get_input(batch, "waveform_lowpass")
-                    waveform = self.postprocessing(waveform, waveform_lowpass)
+                    #waveform = self.postprocessing(waveform, waveform_lowpass)
 
                     max_amp = np.max(np.abs(waveform), axis=-1)
                     waveform = 0.5 * waveform / max_amp[..., None]
@@ -2096,10 +2093,7 @@ class DiffusionWrapper(pl.LightningModule):
                 continue
             elif "concat" in key:
                 cond = cond_dict[key]
-                print("|||scale_factor: ", self.scale_factor, " cond: ", cond.shape)                
                 cond = cond * self.scale_factor
-                print("|||xc: ", xc.shape)
-                print("|||x: ", x.shape, " cond: ", cond.shape)
                 xc = torch.cat([x, cond], dim=1)
                 
             elif "film" in key:

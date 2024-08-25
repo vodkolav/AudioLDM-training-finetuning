@@ -1,7 +1,7 @@
 variables:
   in_channels: &unet_in_channels 32
   latent_embed_dim: &latent_embed_dim 16
-  latent_f_size: &latent_f_size 32
+  latent_f_size: &latent_f_size 8 # must be 1/8 of mel_bins
   latent_t_size: &latent_t_size 128 # TODO might need to change
   mel_bins: &mel_bins 64
   optimize_ddpm_parameter: &optimize_ddpm_parameter true
@@ -57,7 +57,7 @@ model:
                 out_ch: 1
                 resolution: 256
                 z_channels: 16
-              embed_dim: 16
+              embed_dim: *latent_embed_dim
               image_key: fbank
               monitor: val/rec_loss
               sampling_rate: 48000
