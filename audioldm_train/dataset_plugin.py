@@ -3,6 +3,8 @@ import torch
 import numpy as np
 import torchaudio
 import matplotlib.pyplot as plt
+from audioldm_train.utilities.data import utils
+
 
 CACHE = {
     "get_vits_phoneme_ids": {
@@ -143,6 +145,79 @@ def waveform_rs_48k(config, dl_output, metadata):
         waveform_48k = waveform
 
     return {"waveform_48k": waveform_48k}
+
+############ Addition for add_ons Audiosr ##########
+def make_batch_for_super_resolution(config, dl_output, metadata):
+    waveform = dl_output["waveform"]  # [1, samples]
+    sampling_rate = dl_output["sampling_rate"]
+
+    duration = dl_output["duration"]
+                         
+    if(duration % 5.12 != 0):
+        pad_duration = duration + (5.12 - duration % 5.12)
+    else:
+        pad_duration = duration
+
+    target_frame = int(pad_duration * 100)
+
+
+    waveform_lowpass = utils.lowpass_filtering_prepare_inference(dl_output)
+
+    lowpass_mel, lowpass_stft = utils.wav_feature_extraction( waveform_lowpass["waveform_lowpass"], target_frame)
+
+    # waveform_lowpass = torch.FloatTensor(waveform_lowpass).unsqueeze(0)
+    lowpass_mel = torch.FloatTensor(lowpass_mel).unsqueeze(0)
+    
+    return {"lowpass_mel": lowpass_mel}
+
+
+
+def make_batch_for_single_tone_noise(config, dl_output, metadata):
+    waveform = dl_output["waveform"]  # [1, samples]
+    sampling_rate = dl_output["sampling_rate"]
+
+    duration = dl_output["duration"]
+
+    # Randomly pick a single tone noise frequency between 100 Hz and 15 kHz
+    freq = np.random.uniform(100.0, 15000.0)
+
+    # Randomly pick an amplitude noise between 0.1 and 1.0
+    amplitude = np.random.uniform(0.001, 0.2)
+
+    # Generate the single tone waveform
+    t = np.linspace(0, duration, int(sampling_rate * duration), endpoint=False)
+    tone_waveform = amplitude * np.sin(2 * np.pi * freq * t)
+                
+    # Add the single tone to the original waveform
+    waveform_plus_single_tone = waveform + tone_waveform
+
+    if(duration % 5.12 != 0):
+        pad_duration = duration + (5.12 - duration % 5.12)
+    else:
+        pad_duration = duration
+
+    target_frame = int(pad_duration * 100)
+
+
+    # Convert waveform with single tone to tensor and make adjustments of the length if needed. ( same as utils-> lowpass_filtering_prepare_inference)
+    waveform_plus_single_tone = torch.FloatTensor(waveform_plus_single_tone.copy()).unsqueeze(0)
+
+    if waveform.size(-1) <= waveform_plus_single_tone.size(-1):
+        waveform_plus_single_tone = waveform_plus_single_tone[..., : waveform.size(-1)]
+    else:
+        waveform_plus_single_tone = torch.functional.pad(
+            waveform_plus_single_tone, (0, waveform.size(-1) - waveform_plus_single_tone.size(-1))
+        )
+
+
+    audio_plus_single_tone_mel,  audio_plus_single_tone_stft = utils.wav_feature_extraction( waveform_plus_single_tone, target_frame)
+
+
+    audio_plus_single_tone_mel = torch.FloatTensor(audio_plus_single_tone_mel).unsqueeze(0)
+    
+    return {"audio_plus_single_tone_mel": audio_plus_single_tone_mel}
+
+######################################################################
 
 
 def dummy_mel(config, dl_output, metadata):
