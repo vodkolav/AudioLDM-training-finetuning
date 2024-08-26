@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import torchaudio
 import matplotlib.pyplot as plt
-import utils
+from audioldm_train.utilities.data import utils
 
 
 CACHE = {
@@ -185,7 +185,7 @@ def make_batch_for_single_tone_noise(config, dl_output, metadata):
     amplitude = np.random.uniform(0.001, 0.2)
 
     # Generate the single tone waveform
-    t = np.linspace(0, duration, int(sr * duration), endpoint=False)
+    t = np.linspace(0, duration, int(sampling_rate * duration), endpoint=False)
     tone_waveform = amplitude * np.sin(2 * np.pi * freq * t)
                 
     # Add the single tone to the original waveform
