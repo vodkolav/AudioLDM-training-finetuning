@@ -148,8 +148,8 @@ def waveform_rs_48k(config, dl_output, metadata):
 
 ############ Addition for add_ons Audiosr ##########
 def make_batch_for_super_resolution(config, dl_output, metadata):
-    waveform = dl_output["waveform"]  # [1, samples]
-    sampling_rate = dl_output["sampling_rate"]
+    # waveform = dl_output["waveform"]  # [1, samples]
+    # sampling_rate = dl_output["sampling_rate"]
 
     duration = dl_output["duration"]
                          
@@ -161,14 +161,14 @@ def make_batch_for_super_resolution(config, dl_output, metadata):
     target_frame = int(pad_duration * 100)
 
 
-    waveform_lowpass = utils.lowpass_filtering_prepare_inference(dl_output)
+    waveform_lowpass = utils.lowpass_filtering_simulation(dl_output)
 
-    lowpass_mel, lowpass_stft = utils.wav_feature_extraction( waveform_lowpass["waveform_lowpass"], target_frame)
+    lowpass_mel, lowpass_stft = utils.wav_feature_extraction( waveform_lowpass["waveform_lowpass"], target_frame, config)
 
     # waveform_lowpass = torch.FloatTensor(waveform_lowpass).unsqueeze(0)
-    lowpass_mel = torch.FloatTensor(lowpass_mel).unsqueeze(0)
+    lowpass_mel = torch.FloatTensor(lowpass_mel)#.unsqueeze(0)
     
-    return {"lowpass_mel": lowpass_mel}
+    return {"lowpass_mel": lowpass_mel, "waveform_lowpass": waveform_lowpass}
 
 
 
@@ -210,10 +210,10 @@ def make_batch_for_single_tone_noise(config, dl_output, metadata):
         )
 
 
-    audio_plus_single_tone_mel,  audio_plus_single_tone_stft = utils.wav_feature_extraction( waveform_plus_single_tone, target_frame)
+    audio_plus_single_tone_mel,  audio_plus_single_tone_stft = utils.wav_feature_extraction( waveform_plus_single_tone, target_frame, config)
 
 
-    audio_plus_single_tone_mel = torch.FloatTensor(audio_plus_single_tone_mel).unsqueeze(0)
+    audio_plus_single_tone_mel = torch.FloatTensor(audio_plus_single_tone_mel)#.unsqueeze(0)
     
     return {"audio_plus_single_tone_mel": audio_plus_single_tone_mel}
 

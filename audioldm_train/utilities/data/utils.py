@@ -54,6 +54,7 @@ def normalize_wav(waveform):
     waveform = waveform - np.mean(waveform)
     waveform = waveform / (np.max(np.abs(waveform)) + 1e-8)
     return waveform * 0.5
+
 def pad_wav(waveform, target_length):
     waveform_length = waveform.shape[-1]
     assert waveform_length > 100, "Waveform is too short, %s" % waveform_length
@@ -69,20 +70,30 @@ def pad_wav(waveform, target_length):
     return temp_wav
 
 
-def lowpass_filtering_prepare_inference(dl_output):
+def lowpass_filtering_simulation(dl_output):
     waveform = dl_output["waveform"]  # [1, samples]
     sampling_rate = dl_output["sampling_rate"]
 
-    cutoff_freq = (
-        _locate_cutoff_freq(dl_output["stft"], percentile=0.985) / 1024
-    ) * 24000
-    
-    # If the audio is almost empty. Give up processing
-    if(cutoff_freq < 1000):
-        cutoff_freq = 24000
+    # this is only for inference - to find actual cutoff freq of new data
+    # nyq = int(0.5 * sampling_rate)
+    # cutoff_freq = (
+    #     _locate_cutoff_freq(dl_output["stft"], percentile=0.985) / 1024
+    # ) * nyq    
+    # # If the audio is almost empty. Give up processing
+    # if(cutoff_freq < 1000):
+    #     cutoff_freq = nyq - 1000
 
-    order = 8
+    # we first perform lowpass filtering to the audio with a cutoff frequency
+    # uniformly sampled between 2kHz and 16kHz
+    cutoff_freq = int(np.random.random() * 14000 + 2000)
+
+    # To address the filter generalization problem [3], the type of the lowpass filter
+    # is randomly sampled within Chebyshev, Elliptic, Butterworth and Boxcar, 
     ftype = np.random.choice(["butter", "cheby1", "ellip", "bessel"])
+    
+    # and the order of the lowpass filter is randomly selected between 2 and 10.
+    order = np.random.random_integers(2,10)
+ 
     filtered_audio = lowpass(
         waveform.numpy().squeeze(),
         highcut=cutoff_freq,
@@ -135,16 +146,16 @@ def read_audio_file(filename):
     return log_mel_spec, stft, waveform, duration, target_frame
 
 
-def mel_spectrogram_train(y):
+def mel_spectrogram_train(y,config):
     global mel_basis, hann_window
 
-    sampling_rate = 48000
-    filter_length = 2048
-    hop_length = 480
-    win_length = 2048
-    n_mel = 256
-    mel_fmin = 20
-    mel_fmax = 24000
+    sampling_rate =  config["preprocessing"]["audio"]["sampling_rate"]   #48000
+    filter_length = config["preprocessing"]["stft"]["filter_length"] #2048
+    hop_length =  config["preprocessing"]["stft"]["hop_length"] #480
+    win_length = config["preprocessing"]["stft"]["win_length"] #2048
+    n_mel = config["preprocessing"]["mel"]["n_mel_channels"] #256
+    mel_fmin = config["preprocessing"]["mel"]["mel_fmin"] #20
+    mel_fmax = config["preprocessing"]["mel"]["mel_fmax"] #24000
 
     if 24000 not in mel_basis:
         mel = librosa_mel_fn(sr=sampling_rate, n_fft=filter_length, n_mels=n_mel, fmin=mel_fmin, fmax=mel_fmax)
@@ -182,11 +193,11 @@ def mel_spectrogram_train(y):
 
     return mel[0], stft_spec[0]
 
-def wav_feature_extraction(waveform, target_frame):
+def wav_feature_extraction(waveform, target_frame, config):
     waveform = waveform[0, ...]
     waveform = torch.FloatTensor(waveform)
 
-    log_mel_spec, stft = mel_spectrogram_train(waveform.unsqueeze(0))
+    log_mel_spec, stft = mel_spectrogram_train(waveform.unsqueeze(0), config)
 
     log_mel_spec = torch.FloatTensor(log_mel_spec.T)
     stft = torch.FloatTensor(stft.T)

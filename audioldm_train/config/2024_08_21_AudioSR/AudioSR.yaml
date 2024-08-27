@@ -12,10 +12,10 @@ augmentation:
   mixup: 0.0
 data:
   class_label_indices: "audioset_eval_subset"
-  dataloader_add_ons: ["dummy_mel"]
-  test: "audiocaps"
-  train: ["audiocaps"]
-  val: "audiocaps"
+  dataloader_add_ons: ["make_batch_for_super_resolution"]
+  test: "audiocaps_smol"
+  train: ["audiocaps_smol"]
+  val: "audiocaps_smol"
 log_directory: "./log/latent_diffusion"
 metadata_root: "./data/dataset/metadata/dataset_root.json"
 model:
@@ -159,7 +159,7 @@ preprocessing:
 project: "audiosr_train"
 step:
   # limit_val_batches: 2
-  max_steps: 800000
-  save_checkpoint_every_n_steps: 10
+  max_steps: 2000 # 800000
+  save_checkpoint_every_n_steps: 1000 #5000
   save_top_k: 1
-  validation_every_n_epochs: 5
+  validation_every_n_epochs: 1 #5
