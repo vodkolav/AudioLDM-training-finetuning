@@ -103,12 +103,8 @@ def main(configs, config_yaml_path, exp_group_name, exp_name, perform_validation
         % (len(dataset), len(loader), batch_size)
     )
 
-    val_dataset = AudioDataset(configs, split="test", add_ons=dataloader_add_ons)
+    val_dataset = AudioDataset(configs, split="val", add_ons=dataloader_add_ons)
 
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=8,
-    )
 
     # Copy test data
     test_data_subset_folder = os.path.join(
@@ -128,6 +124,12 @@ def main(configs, config_yaml_path, exp_group_name, exp_name, perform_validation
         limit_val_batches = configs["step"]["limit_val_batches"]
     except:
         limit_val_batches = None
+
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=limit_val_batches,
+    )
 
     validation_every_n_epochs = configs["step"]["validation_every_n_epochs"]
     save_checkpoint_every_n_steps = configs["step"]["save_checkpoint_every_n_steps"]

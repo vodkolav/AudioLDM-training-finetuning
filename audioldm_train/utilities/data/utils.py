@@ -73,7 +73,7 @@ def pad_wav(waveform, target_length):
 def lowpass_filtering_simulation(dl_output):
     waveform = dl_output["waveform"]  # [1, samples]
     sampling_rate = dl_output["sampling_rate"]
-
+    duration = dl_output["duration"]
     # this is only for inference - to find actual cutoff freq of new data
     # nyq = int(0.5 * sampling_rate)
     # cutoff_freq = (
@@ -103,6 +103,21 @@ def lowpass_filtering_simulation(dl_output):
         order=order,
         _type=ftype,
     )
+
+    # Add single tone noise
+    # Randomly pick a single tone noise frequency between 100 Hz and 15 kHz
+    freq = np.random.uniform(100.0, cf_max)
+
+    # Randomly pick an amplitude noise between 0.1 and 1.0
+    amplitude = np.random.uniform(0.001, 0.2)
+
+    # Generate the single tone waveform
+    t = np.linspace(0, duration, int(sampling_rate * duration), endpoint=False)
+    tone_waveform = amplitude * np.sin(2 * np.pi * freq * t)
+                
+    # Add the single tone to the original waveform
+    filtered_audio = filtered_audio + tone_waveform
+
 
     filtered_audio = torch.FloatTensor(filtered_audio.copy()).unsqueeze(0)
 
