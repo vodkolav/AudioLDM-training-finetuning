@@ -36,6 +36,37 @@ def print_on_rank0(msg):
     if torch.distributed.get_rank() == 0:
         print(msg)
 
+import json
+from collections import defaultdict
+
+def nested_dict():
+    return defaultdict(nested_dict)
+
+def set_nested_item(d, keys, value):
+    for key in keys[:-1]:
+        d = d[key]
+    d[keys[-1]] = value
+
+# Convert defaultdict to normal dict
+def defaultdict_to_dict(d):
+    if isinstance(d, defaultdict):
+        d = {k: defaultdict_to_dict(v) for k, v in d.items()}
+    return d
+
+def dump(ckpt_dict, file):
+    nested_data = nested_dict()
+    #lst = [ f"'{k}': {ckpt_dict[k].shape.value}" for k in  ckpt_dict.keys()]
+    for key, value in ckpt_dict.items():
+        key_parts = key.split('.')
+        value = value.shape
+        set_nested_item(nested_data, key_parts, value)
+    nested_data = defaultdict_to_dict(nested_data)
+
+    with open(file,'x') as fl:
+        json.dump(nested_data, fl, indent=2)
+        #fl.write('\n'.join(lst))
+
+
 
 def main(configs, config_yaml_path, exp_group_name, exp_name, perform_validation):
     if "seed" in configs.keys():
@@ -192,7 +223,7 @@ def main(configs, config_yaml_path, exp_group_name, exp_name, perform_validation
             # print("==> Warning: The following key in the checkpoint is not presented in the model:", key_not_in_model_state_dict)
             # print("==> Warning: These keys have different size between checkpoint and current model: ", size_mismatch_keys)
 
-            latent_diffusion.load_state_dict(ckpt, strict=False)
+            missing = latent_diffusion.load_state_dict(ckpt, strict=False)
 
         # if(perform_validation):
         #     trainer.validate(latent_diffusion, val_loader)

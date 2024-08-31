@@ -84,8 +84,10 @@ def lowpass_filtering_simulation(dl_output):
     #     cutoff_freq = nyq - 1000
 
     # we first perform lowpass filtering to the audio with a cutoff frequency
-    # uniformly sampled between 2kHz and 16kHz
-    cutoff_freq = int(np.random.random() * 14000 + 2000)
+    # uniformly sampled between 2kHz and 16kHz (for sampling rate 48000)
+    #                or between 2kHz and 5.333kHz (for sampling rate 16000)
+    cf_max = int(sampling_rate / 3) - 3000
+    cutoff_freq = int(np.random.random() * cf_max + 2000)
 
     # To address the filter generalization problem [3], the type of the lowpass filter
     # is randomly sampled within Chebyshev, Elliptic, Butterworth and Boxcar, 
@@ -146,27 +148,30 @@ def read_audio_file(filename):
     return log_mel_spec, stft, waveform, duration, target_frame
 
 
-def mel_spectrogram_train(y,config):
+def mel_spectrogram_train(y, slf):
     global mel_basis, hann_window
 
-    sampling_rate =  config["preprocessing"]["audio"]["sampling_rate"]   #48000
-    filter_length = config["preprocessing"]["stft"]["filter_length"] #2048
-    hop_length =  config["preprocessing"]["stft"]["hop_length"] #480
-    win_length = config["preprocessing"]["stft"]["win_length"] #2048
-    n_mel = config["preprocessing"]["mel"]["n_mel_channels"] #256
-    mel_fmin = config["preprocessing"]["mel"]["mel_fmin"] #20
-    mel_fmax = config["preprocessing"]["mel"]["mel_fmax"] #24000
-
-    if 24000 not in mel_basis:
-        mel = librosa_mel_fn(sr=sampling_rate, n_fft=filter_length, n_mels=n_mel, fmin=mel_fmin, fmax=mel_fmax)
-        mel_basis[str(mel_fmax) + "_" + str(y.device)] = (
+    if slf.mel_fmax not in mel_basis:
+        mel = librosa_mel_fn(
+            sr=slf.sampling_rate, 
+            n_fft=slf.filter_length, 
+            n_mels=slf.n_mel,
+            fmin=slf.mel_fmin, 
+            fmax=slf.mel_fmax,
+            )
+        mel_basis[str(slf.mel_fmax) + "_" + str(y.device)] = (
             torch.from_numpy(mel).float().to(y.device)
         )
-        hann_window[str(y.device)] = torch.hann_window(win_length).to(y.device)
+        hann_window[str(y.device)] = torch.hann_window(slf.win_length).to(
+            y.device
+            )
 
     y = torch.nn.functional.pad(
         y.unsqueeze(1),
-        (int((filter_length - hop_length) / 2), int((filter_length - hop_length) / 2)),
+        (
+            int((slf.filter_length - slf.hop_length) / 2), 
+            int((slf.filter_length - slf.hop_length) / 2),
+            ),
         mode="reflect",
     )
 
@@ -174,9 +179,9 @@ def mel_spectrogram_train(y,config):
 
     stft_spec = torch.stft(
         y,
-        filter_length,
-        hop_length=hop_length,
-        win_length=win_length,
+        slf.filter_length,
+        hop_length=slf.hop_length,
+        win_length=slf.win_length,
         window=hann_window[str(y.device)],
         center=False,
         pad_mode="reflect",
@@ -188,34 +193,48 @@ def mel_spectrogram_train(y,config):
     stft_spec = torch.abs(stft_spec)
 
     mel = spectral_normalize_torch(
-        torch.matmul(mel_basis[str(mel_fmax) + "_" + str(y.device)], stft_spec)
+        torch.matmul(mel_basis[str(slf.mel_fmax) +
+                               "_" + str(y.device)], stft_spec)
     )
 
     return mel[0], stft_spec[0]
 
-def wav_feature_extraction(waveform, target_frame, config):
+class Slf():    
+    # Slf is temporary surrogate for self until i make a proper class 
+    def __init__(self, config) -> None:            
+        self.sampling_rate =  config["preprocessing"]["audio"]["sampling_rate"]   #48000
+        self.filter_length = config["preprocessing"]["stft"]["filter_length"] #2048
+        self.hop_length =  config["preprocessing"]["stft"]["hop_length"] #480
+        self.win_length = config["preprocessing"]["stft"]["win_length"] #2048
+        self.n_mel = config["preprocessing"]["mel"]["n_mel_channels"] #256
+        self.mel_fmin = config["preprocessing"]["mel"]["mel_fmin"] #20
+        self.mel_fmax = config["preprocessing"]["mel"]["mel_fmax"] #24000
+        self.hopsize = config["preprocessing"]["stft"]["hop_length"]
+        self.duration = config["preprocessing"]["audio"]["duration"]
+        self.target_length = int(self.duration * self.sampling_rate / self.hopsize)
+        
+
+def wav_feature_extraction(waveform, slf):
     waveform = waveform[0, ...]
     waveform = torch.FloatTensor(waveform)
 
-    log_mel_spec, stft = mel_spectrogram_train(waveform.unsqueeze(0), config)
+    log_mel_spec, stft = mel_spectrogram_train(waveform.unsqueeze(0), slf)
 
     log_mel_spec = torch.FloatTensor(log_mel_spec.T)
     stft = torch.FloatTensor(stft.T)
 
-    log_mel_spec, stft = pad_spec(log_mel_spec, target_frame), pad_spec(
-        stft, target_frame
-    )
+    log_mel_spec, stft = pad_spec(log_mel_spec, slf), pad_spec(stft, slf)
     return log_mel_spec, stft
 
-def pad_spec(log_mel_spec, target_frame):
+def pad_spec(log_mel_spec, slf):
     n_frames = log_mel_spec.shape[0]
-    p = target_frame - n_frames
+    p = slf.target_length - n_frames
     # cut and pad
     if p > 0:
         m = torch.nn.ZeroPad2d((0, 0, 0, p))
         log_mel_spec = m(log_mel_spec)
     elif p < 0:
-        log_mel_spec = log_mel_spec[0:target_frame, :]
+        log_mel_spec = log_mel_spec[0:slf.target_length, :]
 
     if log_mel_spec.size(-1) % 2 != 0:
         log_mel_spec = log_mel_spec[..., :-1]

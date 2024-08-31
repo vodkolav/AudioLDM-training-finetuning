@@ -812,9 +812,8 @@ class DDPM(pl.LightningModule):
             if isinstance(
                 self.cond_stage_models[model_idx], CLAPAudioEmbeddingClassifierFreev2
             ):
-                self.cond_stage_model_metadata[key][
-                    "cond_stage_key"
-                ] = self.cond_stage_model_metadata[key]["cond_stage_key_orig"]
+                self.cond_stage_model_metadata[key]["cond_stage_key"] = \
+                    self.cond_stage_model_metadata[key]["cond_stage_key_orig"]
                 self.cond_stage_models[
                     model_idx
                 ].embed_mode = self.cond_stage_model_metadata[key]["embed_mode_orig"]
@@ -1790,7 +1789,7 @@ class LatentDiffusion(DDPM):
             todo_waveform = (
                 todo_waveform / np.max(np.abs(todo_waveform))
             ) * 0.8  # Normalize the energy of the generation output
-            sf.write(path, todo_waveform, samplerate=self.sampling_rate)
+            sf.write(path, todo_waveform, samplerate=16000) #self.sampling_rate)
 
     @torch.no_grad()
     def sample_log(
@@ -1889,7 +1888,7 @@ class LatentDiffusion(DDPM):
         if name is None:
             name = self.get_validation_folder_name()
 
-        waveform_save_path = os.path.join(self.get_log_dir(), name)
+        waveform_save_path = os.path.join(self.get_log_dir(), name, "sr")
         waveform_save_path = waveform_save_path.replace("val_0", "infer")
 
         os.makedirs(waveform_save_path, exist_ok=True)
@@ -1982,7 +1981,10 @@ class LatentDiffusion(DDPM):
                         print("Warning: while calculating CLAP score (not fatal), ", e)
                 
                 if (SR):
-                    waveform_lowpass = super().get_input(batch, "waveform_lowpass")
+                    waveform_lowpass = super().get_input(batch, "waveform_lowpass")["waveform_lowpass"].cpu().detach().numpy()
+                    #waveform_lowpass = np.max(np.abs(waveform_lowpass.detach().numpy()), axis =0)
+
+                    waveform_gt = super().get_input(batch, "waveform").cpu().detach().numpy()
                     #waveform = self.postprocessing(waveform, waveform_lowpass)
 
                     max_amp = np.max(np.abs(waveform), axis=-1)
@@ -1991,6 +1993,16 @@ class LatentDiffusion(DDPM):
                     waveform = waveform - mean_amp
 
                 self.save_waveform(waveform, waveform_save_path, name=fnames)
+
+
+                save_path = os.path.join(self.get_log_dir(), name, "lp"  )
+                os.makedirs(save_path, exist_ok=True)
+                self.save_waveform(waveform_lowpass, save_path, name=fnames)
+
+                save_path = os.path.join(self.get_log_dir(), name, "gt" )
+                os.makedirs(save_path, exist_ok=True)
+                self.save_waveform(waveform_gt, save_path,  name=fnames)
+
         return waveform_save_path
 
 
