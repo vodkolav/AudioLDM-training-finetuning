@@ -1,14 +1,14 @@
 variables:
   in_channels: &unet_in_channels 32
   latent_embed_dim: &latent_embed_dim 16
-  latent_f_size: &latent_f_size 8 # must be 1/8 of mel_bins
+  latent_f_size: &latent_f_size 32 # must be 1/8 of mel_bins
   latent_t_size: &latent_t_size 128 # TODO might need to change
-  mel_bins: &mel_bins 64
+  mel_bins: &mel_bins 256
   optimize_ddpm_parameter: &optimize_ddpm_parameter true
   optimize_gpt: &optimize_gpt false
   sampling_rate: &sampling_rate 48000
   warmup_steps: &warmup_steps 5000
-  dataset: &dataset "audiocaps_smol"
+  dataset: &dataset "MUSDB18" 
 augmentation:
   mixup: 0.0
 data:
@@ -22,7 +22,7 @@ metadata_root: "./data/dataset/metadata/dataset_root.json"
 model:
   params:
     base_learning_rate: 0.0001
-    batchsize: 2
+    batchsize: 1
     beta_schedule: cosine
     channels: *latent_embed_dim # TODO might need to change
     cond_stage_config:
@@ -33,7 +33,7 @@ model:
           first_stage_config:
             base_learning_rate: 8.0e-06
             params:
-              batchsize: 4
+              batchsize: 1
               lossconfig:
                 params:
                   disc_in_channels: 1
@@ -67,14 +67,14 @@ model:
             target: audioldm_train.modules.latent_encoder.autoencoder.AutoencoderKL
         target: audioldm_train.conditional_models.VAEFeatureExtract
     evaluation_params:
-      ddim_sampling_steps: 10 # 10 for debug, 200 for real thing
+      ddim_sampling_steps:200
       n_candidates_per_samples: 1
       unconditional_guidance_scale: 3.5
     # Autoencoder
     first_stage_config:
       base_learning_rate: 8.0e-06
       params:
-        batchsize: 4
+        batchsize: 1
         ddconfig:
           attn_resolutions: []
           ch: 128
@@ -159,8 +159,8 @@ preprocessing:
     win_length: 2048
 project: "audiosr_train"
 step:
-  # limit_val_batches: 2
-  max_steps: 2000 # 800000
+  limit_val_batches: 1
+  max_steps: 800000
   save_checkpoint_every_n_steps: 1000 #5000
   save_top_k: 1
   validation_every_n_epochs: 1 #5

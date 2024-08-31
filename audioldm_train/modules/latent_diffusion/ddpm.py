@@ -126,12 +126,12 @@ class DDPM(pl.LightningModule):
         self.log_every_t = log_every_t
         self.first_stage_key = first_stage_key
         self.sampling_rate = sampling_rate
-        self.clap = CLAPAudioEmbeddingClassifierFreev2(
-            pretrained_path="data/checkpoints/clap_music_speech_audioset_epoch_15_esc_89.98.pt",
-            sampling_rate=self.sampling_rate,
-            embed_mode="audio",
-            amodel="HTSAT-base",
-        )
+        # self.clap = CLAPAudioEmbeddingClassifierFreev2(
+        #     pretrained_path="data/checkpoints/clap_music_speech_audioset_epoch_15_esc_89.98.pt",
+        #     sampling_rate=self.sampling_rate,
+        #     embed_mode="audio",
+        #     amodel="HTSAT-base",
+        # )
 
         if self.global_rank == 0:
             self.evaluator = evaluator
@@ -747,6 +747,7 @@ class DDPM(pl.LightningModule):
 
     @torch.no_grad()
     def validation_step(self, batch, batch_idx):
+        torch.cuda.empty_cache() 
         self.generate_sample(
             [batch],
             name=self.validation_folder_name,
@@ -1048,11 +1049,12 @@ class LatentDiffusion(DDPM):
         else:
             self.register_buffer("scale_factor", torch.tensor(scale_factor))
         self.model.scale_factor = self.scale_factor
-        self.instantiate_first_stage(first_stage_config)
+
         self.unconditional_prob_cfg = unconditional_prob_cfg
         self.cond_stage_models = nn.ModuleList([])
         self.instantiate_cond_stage(cond_stage_config)
         self.cond_stage_forward = cond_stage_forward
+        self.instantiate_first_stage(first_stage_config)
         self.clip_denoised = False
         self.bbox_tokenizer = None
         self.conditional_dry_run_finished = False
@@ -1145,8 +1147,9 @@ class LatentDiffusion(DDPM):
             self.make_cond_schedule()
 
     def instantiate_first_stage(self, config):
-        model = instantiate_from_config(config)
-        self.first_stage_model = model.eval()
+        model = self.cond_stage_models._modules['0'].vae
+        #instantiate_from_config(config)
+        self.first_stage_model = model #.eval()
         self.first_stage_model.train = disabled_train
         for param in self.first_stage_model.parameters():
             param.requires_grad = False
@@ -1789,7 +1792,7 @@ class LatentDiffusion(DDPM):
             todo_waveform = (
                 todo_waveform / np.max(np.abs(todo_waveform))
             ) * 0.8  # Normalize the energy of the generation output
-            sf.write(path, todo_waveform, samplerate=16000) #self.sampling_rate)
+            sf.write(path, todo_waveform, samplerate=self.sampling_rate)
 
     @torch.no_grad()
     def sample_log(
@@ -1962,23 +1965,23 @@ class LatentDiffusion(DDPM):
                     mel, savepath=waveform_save_path, bs=None, name=fnames, save=False
                 )
 
-                if n_gen > 1:
-                    try:
-                        best_index = []
-                        similarity = self.clap.cos_similarity(
-                            torch.FloatTensor(waveform).squeeze(1), text
-                        )
-                        for i in range(z.shape[0]):
-                            candidates = similarity[i :: z.shape[0]]
-                            max_index = torch.argmax(candidates).item()
-                            best_index.append(i + max_index * z.shape[0])
+                # if n_gen > 1:
+                #     try:
+                #         best_index = []
+                #         similarity = self.clap.cos_similarity(
+                #             torch.FloatTensor(waveform).squeeze(1), text
+                #         )
+                #         for i in range(z.shape[0]):
+                #             candidates = similarity[i :: z.shape[0]]
+                #             max_index = torch.argmax(candidates).item()
+                #             best_index.append(i + max_index * z.shape[0])
 
-                        waveform = waveform[best_index]
+                #         waveform = waveform[best_index]
 
-                        print("Similarity between generated audio and text", similarity)
-                        print("Choose the following indexes:", best_index)
-                    except Exception as e:
-                        print("Warning: while calculating CLAP score (not fatal), ", e)
+                #         print("Similarity between generated audio and text", similarity)
+                #         print("Choose the following indexes:", best_index)
+                #     except Exception as e:
+                #         print("Warning: while calculating CLAP score (not fatal), ", e)
                 
                 if (SR):
                     waveform_lowpass = super().get_input(batch, "waveform_lowpass")["waveform_lowpass"].cpu().detach().numpy()
