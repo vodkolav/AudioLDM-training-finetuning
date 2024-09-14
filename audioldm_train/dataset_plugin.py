@@ -217,6 +217,75 @@ def make_batch_for_single_tone_noise(config, dl_output, metadata):
     
     return {"audio_plus_single_tone_mel": audio_plus_single_tone_mel}
 
+
+
+
+from scipy.signal import butter, filtfilt
+
+def make_batch_for_single_tone_or_gaussian_noise(config, dl_output, metadata):
+    waveform = dl_output["waveform"]  # [1, samples]
+    sampling_rate = dl_output["sampling_rate"]
+    duration = dl_output["duration"]
+
+    # Randomly choose noise type: 0 for single tone, 1 for Gaussian noise
+    noise_type = np.random.choice([0, 1])
+
+    # Common amplitude and centerfrequency for both noise types
+    amplitude = np.random.uniform(0.001, 0.2)  # Random amplitude between 0.001 and 0.2
+    freq = np.random.uniform(1000.0, 15000.0)  # Random frequency between 1000 Hz and 15 kHz
+
+    if noise_type == 0:
+        # Single-tone noise
+        t = np.linspace(0, duration, int(sampling_rate * duration), endpoint=False)
+        noise_waveform = amplitude * np.sin(2 * np.pi * freq * t)
+
+    else:
+        # Gaussian noise: Generate white noise and filter it to get a Gaussian frequency distribution
+        white_noise = np.random.normal(0, 1, size=waveform.shape[1])  # Generate white noise
+
+        # Define the center frequency and spread (std) of Gaussian noise in frequency domain
+        center_freq = freq  # Random center frequency between 100 Hz and 15 kHz
+        bandwidth = np.random.uniform(50, 800)  # Standard deviation of noise in Hz (e.g., 1kHz)
+
+        # Design a band-pass filter centered at the chosen frequency with the given bandwidth
+        nyquist = 0.5 * sampling_rate
+        low = (center_freq - bandwidth) / nyquist
+        high = (center_freq + bandwidth) / nyquist
+        b, a = butter(N=4, Wn=[low, high], btype='band')  # 4th order Butterworth band-pass filter
+
+        # Apply the filter to the white noise to simulate Gaussian noise spread in frequency
+        noise_waveform = filtfilt(b, a, white_noise) * amplitude
+
+    # Add the selected noise to the original waveform
+    waveform_plus_noise = waveform + noise_waveform
+
+    # Handle padding to make the duration a multiple of 5.12 seconds
+    if duration % 5.12 != 0:
+        pad_duration = duration + (5.12 - duration % 5.12)
+    else:
+        pad_duration = duration
+
+    target_frame = int(pad_duration * 100)
+
+    # Convert waveform with noise to tensor and adjust length if needed
+    waveform_plus_noise = torch.FloatTensor(waveform_plus_noise.copy()).unsqueeze(0)
+
+    if waveform.size(-1) <= waveform_plus_noise.size(-1):
+        waveform_plus_noise = waveform_plus_noise[..., : waveform.size(-1)]
+    else:
+        waveform_plus_noise = torch.functional.pad(
+            waveform_plus_noise, (0, waveform.size(-1) - waveform_plus_noise.size(-1))
+        )
+
+    # Extract features (Mel, STFT)
+    audio_plus_noise_mel, audio_plus_noise_stft = utils.wav_feature_extraction(waveform_plus_noise, target_frame)
+
+    audio_plus_noise_mel = torch.FloatTensor(audio_plus_noise_mel).unsqueeze(0)
+
+    return {"audio_plus_noise_single_or_gaussian_mel": audio_plus_noise_mel}
+
+
+
 ######################################################################
 
 
