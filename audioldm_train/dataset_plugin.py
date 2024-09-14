@@ -220,7 +220,6 @@ def make_batch_for_single_tone_noise(config, dl_output, metadata):
 
 
 
-from scipy.signal import butter, filtfilt
 
 def make_batch_for_single_tone_or_gaussian_noise(config, dl_output, metadata):
     waveform = dl_output["waveform"]  # [1, samples]
@@ -230,31 +229,20 @@ def make_batch_for_single_tone_or_gaussian_noise(config, dl_output, metadata):
     # Randomly choose noise type: 0 for single tone, 1 for Gaussian noise
     noise_type = np.random.choice([0, 1])
 
-    # Common amplitude and centerfrequency for both noise types
-    amplitude = np.random.uniform(0.001, 0.2)  # Random amplitude between 0.001 and 0.2
-    freq = np.random.uniform(1000.0, 15000.0)  # Random frequency between 1000 Hz and 15 kHz
 
     if noise_type == 0:
         # Single-tone noise
+        amplitude = np.random.uniform(0.001, 0.2)  # Random amplitude between 0.001 and 0.2
+        freq = np.random.uniform(1000.0, 15000.0)  # Random frequency between 1000 Hz and 15 kHz
         t = np.linspace(0, duration, int(sampling_rate * duration), endpoint=False)
         noise_waveform = amplitude * np.sin(2 * np.pi * freq * t)
 
     else:
         # Gaussian noise: Generate white noise and filter it to get a Gaussian frequency distribution
         white_noise = np.random.normal(0, 1, size=waveform.shape[1])  # Generate white noise
+        amplitude_gaussian = np.random.uniform(0.001, 0.2)  # Random amplitude between 0.001 and 0.2
+        noise_waveform = white_noise * amplitude_gaussian # Set the white noise amplitude
 
-        # Define the center frequency and spread (std) of Gaussian noise in frequency domain
-        center_freq = freq  # Random center frequency between 100 Hz and 15 kHz
-        bandwidth = np.random.uniform(50, 800)  # Standard deviation of noise in Hz (e.g., 1kHz)
-
-        # Design a band-pass filter centered at the chosen frequency with the given bandwidth
-        nyquist = 0.5 * sampling_rate
-        low = (center_freq - bandwidth) / nyquist
-        high = (center_freq + bandwidth) / nyquist
-        b, a = butter(N=4, Wn=[low, high], btype='band')  # 4th order Butterworth band-pass filter
-
-        # Apply the filter to the white noise to simulate Gaussian noise spread in frequency
-        noise_waveform = filtfilt(b, a, white_noise) * amplitude
 
     # Add the selected noise to the original waveform
     waveform_plus_noise = waveform + noise_waveform
