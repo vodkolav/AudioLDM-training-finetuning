@@ -151,23 +151,25 @@ def make_batch_for_super_resolution(config, dl_output, metadata):
     # waveform = dl_output["waveform"]  # [1, samples]
     # sampling_rate = dl_output["sampling_rate"]
 
-    duration = dl_output["duration"]
+    #duration = dl_output["duration"]
                          
-    if(duration % 5.12 != 0):
-        pad_duration = duration + (5.12 - duration % 5.12)
-    else:
-        pad_duration = duration
+    slf = utils.Slf(config)
 
-    target_frame = int(pad_duration * 100)
+    # if(duration % 5.12 != 0):
+    #     pad_duration = duration + (5.12 - duration % 5.12)
+    # else:
+    #     pad_duration = duration
+    # target_frame = int(pad_duration * 100)
 
+ 
 
     waveform_lowpass = utils.lowpass_filtering_simulation(dl_output)
 
-    lowpass_mel, lowpass_stft = utils.wav_feature_extraction( waveform_lowpass["waveform_lowpass"], target_frame, config)
+    lowpass_mel, lowpass_stft = utils.wav_feature_extraction( waveform_lowpass["waveform_lowpass"], slf)
 
     # waveform_lowpass = torch.FloatTensor(waveform_lowpass).unsqueeze(0)
     lowpass_mel = torch.FloatTensor(lowpass_mel)#.unsqueeze(0)
-    
+    assert dl_output["log_mel_spec"].shape == lowpass_mel.shape
     return {"lowpass_mel": lowpass_mel, "waveform_lowpass": waveform_lowpass}
 
 

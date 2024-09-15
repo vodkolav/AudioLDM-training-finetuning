@@ -105,7 +105,8 @@ class AutoencoderKL(pl.LightningModule):
                 else:
                     print("Key %s mismatch during loading, seems fine" % key)
 
-            self.load_state_dict(load_todo_keys, strict=False)
+            # self.load_state_dict(load_todo_keys, strict=False)
+            missing = self.load_state_dict(pretrained_state_dict, strict=False)
             self.reloaded = True
         else:
             print("Train from scratch")
