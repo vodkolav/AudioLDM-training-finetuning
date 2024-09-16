@@ -129,6 +129,8 @@ def main(configs, config_yaml_path, exp_group_name, exp_name, perform_validation
     val_loader = DataLoader(
         val_dataset,
         batch_size=limit_val_batches,
+        num_workers=4,
+        shuffle=True,
     )
 
     validation_every_n_epochs = configs["step"]["validation_every_n_epochs"]

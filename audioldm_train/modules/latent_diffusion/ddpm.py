@@ -1956,10 +1956,10 @@ class LatentDiffusion(DDPM):
                 )
 
                 mel = self.decode_first_stage(samples)
-
+                
                 SR = True
                 if (SR):
-                    mel = self.mel_replace_ops(mel, super().get_input(batch, "lowpass_mel"))
+                    mel = self.mel_replace_ops(mel, super().get_input(batch, "degraded_mel"))
 
                 waveform = self.mel_spectrogram_to_waveform(
                     mel, savepath=waveform_save_path, bs=None, name=fnames, save=False
@@ -1984,7 +1984,7 @@ class LatentDiffusion(DDPM):
                 #         print("Warning: while calculating CLAP score (not fatal), ", e)
                 
                 if (SR):
-                    waveform_lowpass = super().get_input(batch, "waveform_lowpass")["waveform_lowpass"].cpu().detach().numpy()
+                    degraded_waveform = super().get_input(batch, "degraded_waveform").cpu().detach().numpy()
                     #waveform_lowpass = np.max(np.abs(waveform_lowpass.detach().numpy()), axis =0)
 
                     waveform_gt = super().get_input(batch, "waveform").cpu().detach().numpy()
@@ -1997,10 +1997,12 @@ class LatentDiffusion(DDPM):
 
                 self.save_waveform(waveform, waveform_save_path, name=fnames)
 
-
-                save_path = os.path.join(self.get_log_dir(), name, "lp"  )
+                noise_types = super().get_input(batch, "noise_type")
+                save_path = os.path.join(self.get_log_dir(), name, "lp")
                 os.makedirs(save_path, exist_ok=True)
-                self.save_waveform(waveform_lowpass, save_path, name=fnames)
+
+                tmp = [fn.replace("stem.mp4",nt) for fn, nt in zip(fnames,noise_types) ]
+                self.save_waveform(degraded_waveform, save_path, name=tmp)
 
                 save_path = os.path.join(self.get_log_dir(), name, "gt" )
                 os.makedirs(save_path, exist_ok=True)

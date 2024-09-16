@@ -161,16 +161,32 @@ def make_batch_for_super_resolution(config, dl_output, metadata):
     #     pad_duration = duration
     # target_frame = int(pad_duration * 100)
 
+    waveform = dl_output["waveform"]  # [1, samples]
+    sampling_rate = dl_output["sampling_rate"]
+    duration = dl_output["duration"]
  
+   # first , add narrowband or white noise
+    degraded_waveform, noise_type = single_tone_or_gaussian_noise(waveform, sampling_rate, duration)
 
-    waveform_lowpass = utils.lowpass_filtering_simulation(dl_output)
+    # second perform lowpas on the signal
+    degraded_waveform = lowpass_filtering(waveform, sampling_rate, duration)
 
-    lowpass_mel, lowpass_stft = utils.wav_feature_extraction( waveform_lowpass["waveform_lowpass"], slf)
+    degraded_waveform = torch.FloatTensor(degraded_waveform.copy()).unsqueeze(0)
+
+    if waveform.size(-1) <= degraded_waveform.size(-1):
+        degraded_waveform = degraded_waveform[..., : waveform.size(-1)]
+    else:
+        degraded_waveform = torch.functional.pad(
+            degraded_waveform, (0, waveform.size(-1) - degraded_waveform.size(-1))
+        )
+
+
+    degraded_mel, lowpass_stft = utils.wav_feature_extraction( degraded_waveform, slf)
 
     # waveform_lowpass = torch.FloatTensor(waveform_lowpass).unsqueeze(0)
-    lowpass_mel = torch.FloatTensor(lowpass_mel)#.unsqueeze(0)
-    assert dl_output["log_mel_spec"].shape == lowpass_mel.shape
-    return {"lowpass_mel": lowpass_mel, "waveform_lowpass": waveform_lowpass}
+    degraded_mel = torch.FloatTensor(degraded_mel)#.unsqueeze(0)
+    assert dl_output["log_mel_spec"].shape == degraded_mel.shape
+    return {"degraded_mel": degraded_mel, "degraded_waveform": degraded_waveform, "noise_type": noise_type}
 
 
 
@@ -219,20 +235,13 @@ def make_batch_for_single_tone_noise(config, dl_output, metadata):
     
     return {"audio_plus_single_tone_mel": audio_plus_single_tone_mel}
 
+def single_tone_or_gaussian_noise(waveform, sampling_rate, duration):
+
+    # Randomly choose noise type: 0 for single tone, 1 for Gaussian (white) noise
+    noise_type = np.random.choice(["ton","wht"])
 
 
-
-
-def make_batch_for_single_tone_or_gaussian_noise(config, dl_output, metadata):
-    waveform = dl_output["waveform"]  # [1, samples]
-    sampling_rate = dl_output["sampling_rate"]
-    duration = dl_output["duration"]
-
-    # Randomly choose noise type: 0 for single tone, 1 for Gaussian noise
-    noise_type = np.random.choice([0, 1])
-
-
-    if noise_type == 0:
+    if noise_type == "ton":
         # Single-tone noise
         amplitude = np.random.uniform(0.001, 0.2)  # Random amplitude between 0.001 and 0.2
         freq = np.random.uniform(1000.0, 15000.0)  # Random frequency between 1000 Hz and 15 kHz
@@ -241,40 +250,41 @@ def make_batch_for_single_tone_or_gaussian_noise(config, dl_output, metadata):
 
     else:
         # Gaussian noise: Generate white noise and filter it to get a Gaussian frequency distribution
-        white_noise = np.random.normal(0, 1, size=waveform.shape[1])  # Generate white noise
-        amplitude_gaussian = np.random.uniform(0.001, 0.2)  # Random amplitude between 0.001 and 0.2
+        white_noise = np.random.normal(0, 1, size=waveform.shape[0])  # Generate white noise
+        amplitude_gaussian = np.random.uniform(0.001, 0.02)  # Random amplitude between 0.001 and 0.2
         noise_waveform = white_noise * amplitude_gaussian # Set the white noise amplitude
 
 
     # Add the selected noise to the original waveform
     waveform_plus_noise = waveform + noise_waveform
+ 
+    return waveform_plus_noise, noise_type
 
-    # Handle padding to make the duration a multiple of 5.12 seconds
-    if duration % 5.12 != 0:
-        pad_duration = duration + (5.12 - duration % 5.12)
-    else:
-        pad_duration = duration
+def lowpass_filtering(waveform, sampling_rate, duration):
 
-    target_frame = int(pad_duration * 100)
+    # we first perform lowpass filtering to the audio with a cutoff frequency
+    # uniformly sampled between 2kHz and 16kHz (for sampling rate 48000)
+    #                or between 2kHz and 5.333kHz (for sampling rate 16000)
+    cf_max = int(sampling_rate / 3) - 3000
+    cutoff_freq = int(np.random.random() * cf_max + 2000)
 
-    # Convert waveform with noise to tensor and adjust length if needed
-    waveform_plus_noise = torch.FloatTensor(waveform_plus_noise.copy()).unsqueeze(0)
+    # To address the filter generalization problem [3], the type of the lowpass filter
+    # is randomly sampled within Chebyshev, Elliptic, Butterworth and Boxcar, 
+    ftype = np.random.choice(["butter", "cheby1", "ellip", "bessel"])
+    
+    # and the order of the lowpass filter is randomly selected between 2 and 10.
+    order = np.random.random_integers(2,10)
+ 
+    filtered_audio = utils.lowpass(
+        waveform.numpy().squeeze(),
+        highcut=cutoff_freq,
+        fs=sampling_rate,
+        order=order,
+        _type=ftype,
+    )
 
-    if waveform.size(-1) <= waveform_plus_noise.size(-1):
-        waveform_plus_noise = waveform_plus_noise[..., : waveform.size(-1)]
-    else:
-        waveform_plus_noise = torch.functional.pad(
-            waveform_plus_noise, (0, waveform.size(-1) - waveform_plus_noise.size(-1))
-        )
-
-    # Extract features (Mel, STFT)
-    audio_plus_noise_mel, audio_plus_noise_stft = utils.wav_feature_extraction(waveform_plus_noise, target_frame)
-
-    audio_plus_noise_mel = torch.FloatTensor(audio_plus_noise_mel).unsqueeze(0)
-
-    return {"audio_plus_noise_single_or_gaussian_mel": audio_plus_noise_mel}
-
-
+    return filtered_audio
+  
 
 ######################################################################
 
