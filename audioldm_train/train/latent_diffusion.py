@@ -129,8 +129,7 @@ def main(configs, config_yaml_path, exp_group_name, exp_name, perform_validation
     val_loader = DataLoader(
         val_dataset,
         batch_size=limit_val_batches,
-        num_workers=4,
-        shuffle=True,
+        num_workers=4      
     )
 
     validation_every_n_epochs = configs["step"]["validation_every_n_epochs"]
@@ -232,10 +231,13 @@ def main(configs, config_yaml_path, exp_group_name, exp_name, perform_validation
         # if(perform_validation):
         #     trainer.validate(latent_diffusion, val_loader)
 
+        #dump(latent_diffusion.state_dict(), "OUTOFMEM.json")
+
         trainer.fit(latent_diffusion, loader, val_loader)
     else:
-        trainer.fit(
-            latent_diffusion, loader, val_loader, ckpt_path=resume_from_checkpoint
+        #dump(latent_diffusion.state_dict(), "from_external_checkpoint.json")
+        trainer.fit(latent_diffusion, loader, val_loader, 
+                    ckpt_path=resume_from_checkpoint
         )
 
 

@@ -169,7 +169,7 @@ def make_batch_for_super_resolution(config, dl_output, metadata):
     degraded_waveform, noise_type = single_tone_or_gaussian_noise(waveform, sampling_rate, duration)
 
     # second perform lowpas on the signal
-    degraded_waveform = lowpass_filtering(waveform, sampling_rate, duration)
+    degraded_waveform = lowpass_filtering(degraded_waveform, sampling_rate, duration)
 
     degraded_waveform = torch.FloatTensor(degraded_waveform.copy()).unsqueeze(0)
 
@@ -250,7 +250,7 @@ def single_tone_or_gaussian_noise(waveform, sampling_rate, duration):
 
     else:
         # Gaussian noise: Generate white noise and filter it to get a Gaussian frequency distribution
-        white_noise = np.random.normal(0, 1, size=waveform.shape[0])  # Generate white noise
+        white_noise = np.random.normal(0, 1, size=waveform.shape[1])  # Generate white noise
         amplitude_gaussian = np.random.uniform(0.001, 0.02)  # Random amplitude between 0.001 and 0.2
         noise_waveform = white_noise * amplitude_gaussian # Set the white noise amplitude
 
