@@ -16,6 +16,7 @@ from torchvision.utils import make_grid
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from audioldm_train.modules.encoders.modules import *
 import datetime
+import json
 
 from audioldm_train.utilities.model_util import (
     exists,
@@ -1997,12 +1998,20 @@ class LatentDiffusion(DDPM):
 
                 self.save_waveform(waveform, waveform_save_path, name=fnames)
 
-                noise_types = super().get_input(batch, "noise_type")
+
                 save_path = os.path.join(self.get_log_dir(), name, "lp")
                 os.makedirs(save_path, exist_ok=True)
 
-                tmp = [fn.replace("stem.mp4",nt) for fn, nt in zip(fnames,noise_types) ]
-                self.save_waveform(degraded_waveform, save_path, name=tmp)
+                
+                degradations = super().get_input(batch, "degradation")      
+                tmp = [{"file": fn , "degradations": dg} for fn, dg in zip(fnames,degradations)]
+                jfile = os.path.join(self.get_log_dir(), name, "degradation.json")
+                with open(jfile, 'x') as fp:
+                    json.dump(tmp, fp, indent=2)
+
+
+
+                self.save_waveform(degraded_waveform, save_path, name=fnames)
 
                 save_path = os.path.join(self.get_log_dir(), name, "gt" )
                 os.makedirs(save_path, exist_ok=True)

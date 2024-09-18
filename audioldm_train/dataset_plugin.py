@@ -4,7 +4,7 @@ import numpy as np
 import torchaudio
 import matplotlib.pyplot as plt
 from audioldm_train.utilities.data import utils
-
+import json
 
 CACHE = {
     "get_vits_phoneme_ids": {
@@ -166,10 +166,10 @@ def make_batch_for_super_resolution(config, dl_output, metadata):
     duration = dl_output["duration"]
  
    # first , add narrowband or white noise
-    degraded_waveform, noise_type = single_tone_or_gaussian_noise(waveform, sampling_rate, duration)
+    degraded_waveform, degrad1 = single_tone_or_gaussian_noise(waveform, sampling_rate, duration)
 
     # second perform lowpas on the signal
-    degraded_waveform = lowpass_filtering(degraded_waveform, sampling_rate, duration)
+    degraded_waveform, degrad2 = lowpass_filtering(degraded_waveform, sampling_rate, duration)
 
     degraded_waveform = torch.FloatTensor(degraded_waveform.copy()).unsqueeze(0)
 
@@ -180,13 +180,14 @@ def make_batch_for_super_resolution(config, dl_output, metadata):
             degraded_waveform, (0, waveform.size(-1) - degraded_waveform.size(-1))
         )
 
+    degradation = json.dumps([degrad1, degrad2])
 
     degraded_mel, lowpass_stft = utils.wav_feature_extraction( degraded_waveform, slf)
 
     # waveform_lowpass = torch.FloatTensor(waveform_lowpass).unsqueeze(0)
     degraded_mel = torch.FloatTensor(degraded_mel)#.unsqueeze(0)
     assert dl_output["log_mel_spec"].shape == degraded_mel.shape
-    return {"degraded_mel": degraded_mel, "degraded_waveform": degraded_waveform, "noise_type": noise_type}
+    return {"degraded_mel": degraded_mel, "degraded_waveform": degraded_waveform, "degradation": degradation}
 
 
 
@@ -237,9 +238,10 @@ def make_batch_for_single_tone_noise(config, dl_output, metadata):
 
 def single_tone_or_gaussian_noise(waveform, sampling_rate, duration):
 
-    # Randomly choose noise type: 0 for single tone, 1 for Gaussian (white) noise
+    # Randomly choose noise type: "ton" for single tone, "wht" for Gaussian (white) noise
     noise_type = np.random.choice(["ton","wht"])
 
+    
 
     if noise_type == "ton":
         # Single-tone noise
@@ -247,18 +249,18 @@ def single_tone_or_gaussian_noise(waveform, sampling_rate, duration):
         freq = np.random.uniform(1000.0, 15000.0)  # Random frequency between 1000 Hz and 15 kHz
         t = np.linspace(0, duration, int(sampling_rate * duration), endpoint=False)
         noise_waveform = amplitude * np.sin(2 * np.pi * freq * t)
-
+        degradation = {"type": noise_type, "freq": freq, "amplitude": amplitude }
     else:
         # Gaussian noise: Generate white noise and filter it to get a Gaussian frequency distribution
         white_noise = np.random.normal(0, 1, size=waveform.shape[1])  # Generate white noise
         amplitude_gaussian = np.random.uniform(0.001, 0.02)  # Random amplitude between 0.001 and 0.2
         noise_waveform = white_noise * amplitude_gaussian # Set the white noise amplitude
-
+        degradation = {"type": noise_type, "amplitude": amplitude_gaussian }
 
     # Add the selected noise to the original waveform
     waveform_plus_noise = waveform + noise_waveform
  
-    return waveform_plus_noise, noise_type
+    return waveform_plus_noise, degradation
 
 def lowpass_filtering(waveform, sampling_rate, duration):
 
@@ -282,8 +284,9 @@ def lowpass_filtering(waveform, sampling_rate, duration):
         order=order,
         _type=ftype,
     )
+    degradation = {"type": "lowpass", "freq": cutoff_freq, "filter": ftype, "filter_order": order }
+    return filtered_audio, degradation
 
-    return filtered_audio
   
 
 ######################################################################
